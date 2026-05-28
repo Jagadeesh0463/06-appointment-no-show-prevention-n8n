@@ -1,35 +1,79 @@
-# Environment variables
+# =========================
+# Environment & Secrets
+# =========================
 .env
 .env.local
 .env.production
-
-# API Keys
+.env.development
+.env.staging
 secrets.json
 credentials.json
+api-keys.json
+*.key
+*.pem
+*.secret
 
-# n8n local data
+# =========================
+# n8n Local Data
+# =========================
 .n8n/
 n8n-data/
+n8n-local/
+*.sqlite
+*.db
 
-# OS files
+# =========================
+# OS Files
+# =========================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
 
-# Editor files
+# =========================
+# Editor & IDE
+# =========================
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
 
+# =========================
 # Logs
+# =========================
 *.log
 logs/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
-# Node modules
+# =========================
+# Node
+# =========================
 node_modules/
+package-lock.json
+yarn.lock
 
-# Temp files
+# =========================
+# Temp & Cache
+# =========================
 *.tmp
 *.temp
+.cache/
+tmp/
+temp/
+
+# =========================
+# Google Credentials
+# =========================
+google-credentials.json
+service-account.json
+token.json
