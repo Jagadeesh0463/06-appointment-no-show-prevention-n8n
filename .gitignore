@@ -1,0 +1,35 @@
+# Environment variables
+.env
+.env.local
+.env.production
+
+# API Keys
+secrets.json
+credentials.json
+
+# n8n local data
+.n8n/
+n8n-data/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Node modules
+node_modules/
+
+# Temp files
+*.tmp
+*.temp
