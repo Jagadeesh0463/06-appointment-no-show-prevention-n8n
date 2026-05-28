@@ -1,0 +1,316 @@
+{
+  "name": "Predictive No-Show Prevention System",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": { "item": [{ "mode": "everyMinute" }] },
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit?gid=179009296#gid=179009296", "mode": "url" },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "fc109854-95ce-4d55-b744-2e3383531f52",
+      "name": "Booking Trigger",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [272, -192],
+      "credentials": { "googleSheetsTriggerOAuth2Api": { "id": "C99aCCY5HJJaqzGk", "name": "Google Sheets Trigger account" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [{ "id": "8dfa6846-58de-4a55-8b3e-d651bb47c562", "leftValue": "={{ $json.is_processed }}", "rightValue": "", "operator": { "type": "string", "operation": "empty", "singleValue": true } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [496, -192],
+      "id": "1c4be4ac-4861-417d-8b12-1cf8477f28f4",
+      "name": "Is New Booking"
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit?gid=0#gid=0", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit?gid=0#gid=0", "mode": "url" },
+        "filtersUI": { "values": [{ "lookupColumn": "client_id", "lookupValue": "={{ $json.client_id }}" }] },
+        "options": {}
+      },
+      "id": "9120d9b9-f4a0-452d-a412-6f1666a4a03f",
+      "name": "Fetch Client History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [768, -208],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "m5nJSDOlmxk0sA00", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const booking = $('Booking Trigger').item.json;\nconst history = $('Fetch Client History').all().find(item => item.json.client_id === booking.client_id)?.json || {};\n\nconst apptDate = new Date(booking.appointment_date);\nconst now = new Date();\nconst daysAhead = (apptDate - now) / (1000*60*60*24);\nconst hour = apptDate.getHours();\nconst day = apptDate.getDay();\n\nconst totalBookings = Number(history.total_bookings || 0);\nconst noShows = Number(history.no_shows || 0);\nconst attended = Number(history.attended || 0);\nconst cancelled = Number(history.cancelled || 0);\nconst riskAvg = Number(history.risk_avg || 0);\n\nlet score = 0;\nlet dominant = 'social_proof';\n\nif (daysAhead > 30) { score += 20; dominant = 'motivation'; }\nif (totalBookings === 0) { score += 20; dominant = 'logistics'; }\nif (day === 1 && hour < 10) { score += 15; }\nif (day === 5 && hour > 16) { score += 15; }\nif (noShows > 0) { score += (noShows * 20); dominant = 'waitlist'; }\nif (riskAvg > 50) { score += 20; }\n\nconst attendanceRate = totalBookings > 0 ? attended / totalBookings : 1;\nif (attendanceRate < 0.8) { score += 15; }\nif (cancelled >= 2) { score += 10; }\n\nscore = Math.min(score, 100);\n\nlet riskLevel = 'low';\nif (score >= 70) { riskLevel = 'high'; }\nelse if (score >= 40) { riskLevel = 'medium'; }\n\nlet waitHours = 12;\nif (riskLevel === 'high') { waitHours = 48; }\nelse if (riskLevel === 'medium') { waitHours = 24; }\n\nconst followupNeeded = score >= 35 || noShows > 0;\n\nconst token = 'tk_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);\n\nreturn {\n  json: {\n    ...booking,\n    ...history,\n    risk_score: score,\n    risk_level: riskLevel,\n    wait_hours: waitHours,\n    dominant_signal: dominant,\n    message_sent: dominant,\n    confirm_token: token,\n    followup_needed: followupNeeded,\n    last_reminder_sent: null,\n    workflow_version: 'v1',\n    generated_at: new Date().toISOString()\n  }\n};"
+      },
+      "id": "7fb41cdc-81e2-4780-b2ca-735644efe56f",
+      "name": "Risk Score Engine",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1024, -208]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "={{ 'Appointment Request – ' + $json.service_type }}",
+        "emailType": "text",
+        "message": "={{ 'Hi ' + $json.name + ',\\n\\nYour ' + $json.service_type + ' appointment request has been received for ' + $json.appointment_date + '.\\n\\nYou booked because: \"' + $json.reason_for_booking + '\"\\n\\n👉 Please confirm your attendance:\\nhttp://localhost:5678/webhook/confirm?token=' + $json.confirm_token + '\\n\\nSee you soon!' }}",
+        "options": {}
+      },
+      "id": "f5ba9621-3d28-484b-8044-e7cd8dc49b25",
+      "name": "Commitment Message",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1280, -208],
+      "webhookId": "fc138f85-6203-462d-b84a-f91c1a06f780",
+      "credentials": { "gmailOAuth2": { "id": "MzCK1wWoAgbK5skR", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit?gid=179009296#gid=179009296", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "Appointment_Records", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $('Risk Score Engine').item.json.booking_id }}",
+            "client_id": "={{ $('Risk Score Engine').item.json.client_id }}",
+            "appointment_date": "={{ $('Risk Score Engine').item.json.appointment_date }}",
+            "service_type": "={{ $('Risk Score Engine').item.json.service_type }}",
+            "risk_score": "={{ $('Risk Score Engine').item.json.risk_score }}",
+            "status": "pending",
+            "confirm_token": "={{ $('Risk Score Engine').item.json.confirm_token }}",
+            "message_sent": "={{ $('Risk Score Engine').item.json.dominant_signal }}",
+            "outcome": "pending",
+            "reason_for_booking": "={{ $('Risk Score Engine').item.json.reason_for_booking }}",
+            "workflow_version": "v1",
+            "is_processed": "TRUE"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "booking_id", "displayName": "booking_id", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "client_id", "displayName": "client_id", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "appointment_date", "displayName": "appointment_date", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "service_type", "displayName": "service_type", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "risk_score", "displayName": "risk_score", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "confirm_token", "displayName": "confirm_token", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "message_sent", "displayName": "message_sent", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "outcome", "displayName": "outcome", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "reason_for_booking", "displayName": "reason_for_booking", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "workflow_version", "displayName": "workflow_version", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "is_processed", "displayName": "is_processed", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "a2c32b13-3690-45b7-aeaf-5ea7576672d1",
+      "name": "Store Booking Record",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1536, -208],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "m5nJSDOlmxk0sA00", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{\nDateTime\n.fromFormat(\n$json.appointment_date,\n'yyyy-MM-dd HH:mm'\n)\n.minus({\nhours:$json.wait_hours\n})\n.toISO()\n}}"
+      },
+      "id": "6cab83a6-b8b9-4bc4-9100-00ca86401e23",
+      "name": "Wait Dynamic",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1808, -208],
+      "webhookId": "wait-dynamic-001"
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "Appointment_Records", "mode": "name" },
+        "filtersUI": { "values": [{ "lookupColumn": "confirm_token", "lookupValue": "={{ $json.confirm_token }}" }] },
+        "options": {}
+      },
+      "id": "2c4bd427-39ea-4d63-bb5d-98b6936f0201",
+      "name": "Status Check",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2064, -208],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "m5nJSDOlmxk0sA00", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 3 },
+          "conditions": [{ "id": "64349bf3-f4a0-4790-ba9b-e237f28f7d4b", "leftValue": "={{ $('Status Check').item.json.status }}", "rightValue": "confirmed", "operator": { "type": "string", "operation": "equals" } }],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [2400, -208],
+      "id": "cb4428e2-b0d6-42a3-a927-7053de6b51de",
+      "name": "Confirmed Check"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer {{$env.GROQ_API_KEY}}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"llama-3.1-8b-instant\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You write warm appointment reminders. Maximum 2 short sentences. Mention appointment date naturally. Never mention risk level or internal scores. Always end with the confirmation link.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Client: {{ $('Risk Score Engine').item.json.name }} | Appointment: {{ $('Risk Score Engine').item.json.service_type }} | Date: {{ $('Risk Score Engine').item.json.appointment_date }} | Reason: {{ $('Risk Score Engine').item.json.reason_for_booking }} | Strategy: {{ $('Risk Score Engine').item.json.dominant_signal }} | Confirm Link: http://localhost:5678/webhook/confirm?token={{ $('Risk Score Engine').item.json.confirm_token }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 120\n}",
+        "options": {}
+      },
+      "id": "cf613344-2c85-4099-b849-f37692670a10",
+      "name": "Reminder AI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2704, -192]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Risk Score Engine').item.json.email }}",
+        "subject": "={{ 'Reminder: ' + $('Risk Score Engine').item.json.service_type + ' on ' + $('Risk Score Engine').item.json.appointment_date }}",
+        "emailType": "text",
+        "message": "={{ $json.choices[0].message.content }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [2992, -192],
+      "id": "c1b7b2c1-5e38-4b64-853a-5d3e14dbe033",
+      "name": "Send Reminder Email",
+      "webhookId": "49549619-9f75-41ea-a60f-5dda9a5d730b",
+      "credentials": { "gmailOAuth2": { "id": "MzCK1wWoAgbK5skR", "name": "Gmail account" } }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "Appointment_Records", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "booking_id": "={{ $('Status Check').item.json.booking_id }}",
+            "status": "={{ $('Risk Score Engine').item.json.followup_needed ? 'followup_required' : 'reminder_sent' }}",
+            "outcome": "pending_followup"
+          },
+          "matchingColumns": ["booking_id"],
+          "schema": [
+            { "id": "booking_id", "displayName": "booking_id", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "outcome", "displayName": "outcome", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "af78fa97-6969-4b7b-ad79-dd4bd16bfe59",
+      "name": "Update Booking Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3264, -192],
+      "credentials": { "googleSheetsOAuth2Api": { "id": "m5nJSDOlmxk0sA00", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "path": "confirm",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [3024, 96],
+      "id": "390a6dec-2900-4cf5-942d-51b99651facc",
+      "name": "Webhook Confirm",
+      "webhookId": "c80a4e40-c9b7-458a-879c-5fbb1d625eba"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": { "__rl": true, "value": "https://docs.google.com/spreadsheets/d/1H5r7m_h-pE-cKi8m68gpQjwr5CWh8RUcTeCPJFBTbW0/edit", "mode": "url" },
+        "sheetName": { "__rl": true, "value": "Appointment_Records", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "confirm_token": "={{ $json.query.token }}",
+            "status": "confirmed",
+            "outcome": "confirmed"
+          },
+          "matchingColumns": ["confirm_token"],
+          "schema": [
+            { "id": "confirm_token", "displayName": "confirm_token", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true, "removed": false },
+            { "id": "status", "displayName": "status", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true },
+            { "id": "outcome", "displayName": "outcome", "required": false, "defaultMatch": false, "display": true, "type": "string", "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [3328, 96],
+      "id": "fb01be91-45d5-45cc-a5fa-8b9db89064b7",
+      "name": "Update Confirmation Status",
+      "credentials": { "googleSheetsOAuth2Api": { "id": "m5nJSDOlmxk0sA00", "name": "Google Sheets account" } }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Update Confirmation Status').item.json.email }}",
+        "subject": "={{ 'See you soon, ' + $('Update Confirmation Status').item.json.name + '!' }}",
+        "emailType": "text",
+        "message": "={{ 'Hi ' + $('Update Confirmation Status').item.json.name + ', you are confirmed for your ' + $('Update Confirmation Status').item.json.service_type + ' on ' + $('Update Confirmation Status').item.json.appointment_date + '. See you then!' }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [3648, 96],
+      "id": "8b1b7c5b-4b22-4ea1-a06f-2208a08cc1be",
+      "name": "Send Confirmation Reply",
+      "webhookId": "dbe5c62d-ff00-45a7-8720-0f2119e3fc3b",
+      "credentials": { "gmailOAuth2": { "id": "MzCK1wWoAgbK5skR", "name": "Gmail account" } }
+    }
+  ],
+  "connections": {
+    "Booking Trigger": { "main": [[{ "node": "Is New Booking", "type": "main", "index": 0 }]] },
+    "Is New Booking": { "main": [[{ "node": "Fetch Client History", "type": "main", "index": 0 }]] },
+    "Fetch Client History": { "main": [[{ "node": "Risk Score Engine", "type": "main", "index": 0 }]] },
+    "Risk Score Engine": { "main": [[{ "node": "Commitment Message", "type": "main", "index": 0 }]] },
+    "Commitment Message": { "main": [[{ "node": "Store Booking Record", "type": "main", "index": 0 }]] },
+    "Store Booking Record": { "main": [[{ "node": "Wait Dynamic", "type": "main", "index": 0 }]] },
+    "Wait Dynamic": { "main": [[{ "node": "Status Check", "type": "main", "index": 0 }]] },
+    "Status Check": { "main": [[{ "node": "Confirmed Check", "type": "main", "index": 0 }]] },
+    "Confirmed Check": {
+      "main": [
+        [],
+        [{ "node": "Reminder AI", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reminder AI": { "main": [[{ "node": "Send Reminder Email", "type": "main", "index": 0 }]] },
+    "Send Reminder Email": { "main": [[{ "node": "Update Booking Status", "type": "main", "index": 0 }]] },
+    "Webhook Confirm": { "main": [[{ "node": "Update Confirmation Status", "type": "main", "index": 0 }]] },
+    "Update Confirmation Status": { "main": [[{ "node": "Send Confirmation Reply", "type": "main", "index": 0 }]] },
+    "Send Confirmation Reply": { "main": [[]] }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b54ab3f2387a08ad41459dc70b5fa6c6b62400d3cba35fe5bdc357ca66bc9f6b"
+  }
+}
